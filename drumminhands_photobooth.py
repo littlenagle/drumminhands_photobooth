@@ -37,20 +37,22 @@ button3_pin = 16 # pin for button to end the program, but not shutdown the pi
 enable_color_effects = 0 # default 1. Change to 0 if you don't want to upload pics.
 enable_image_effects = 0 # default 1. Change to 0 if you don't want to upload pics.
 post_online = 1 # default 1. Change to 0 if you don't want to upload pics.
+
 total_pics = 4 # number of pics to be taken
-capture_delay = 2 # delay between pics
-prep_delay = 2 # number of seconds at step 1 as users prep to have photo taken
+capture_delay = 4 # delay between pics
+prep_delay = 3 # number of seconds at step 1 as users prep to have photo taken
 gif_delay = 100 # How much time between frames in the animated gif
 restart_delay = 4 # how long to display finished message before beginning a new session
 
 monitor_w = 800
 monitor_h = 480
-transform_x = 640 # how wide to scale the jpg when replaying
+transform_x = 800 # how wide to scale the jpg when replaying
 transfrom_y = 480 # how high to scale the jpg when replaying
-offset_x = 80 # how far off to left corner to display photos
+
+offset_x = 0 # how far off to left corner to display photos
 offset_y = 0 # how far off to left corner to display photos
 replay_delay = 1 # how much to wait in-between showing pics on-screen after taking
-replay_cycles = 2 # how many times to show each photo on-screen after taking
+replay_cycles = 1 # how many times to show each photo on-screen after taking
 
 test_server = 'www.google.com'
 real_path = os.path.dirname(os.path.realpath(__file__))
@@ -74,13 +76,13 @@ GPIO.setup(led3_pin,GPIO.OUT) # LED 3
 GPIO.setup(led4_pin,GPIO.OUT) # LED 4
 
 GPIO.setup(button1_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP) # falling edge detection on button 1
-GPIO.setup(button2_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP) # falling edge detection on button 2
-GPIO.setup(button3_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP) # falling edge detection on button 3
+GPIO.setup(button2_pin, GPIO.IN, pull_up_down=GPIO.PUD_DOWN) # falling edge detection on button 2
+GPIO.setup(button3_pin, GPIO.IN, pull_up_down=GPIO.PUD_DOWN) # falling edge detection on button 3
 
 GPIO.output(led1_pin,False);
 GPIO.output(led2_pin,False);
 GPIO.output(led3_pin,False);
-GPIO.output(led4_pin,False); #for some reason the pin turns on at the beginning of the program. why?????????????????????????????????
+GPIO.output(led4_pin,False); 
 
 #################
 ### Functions ###
@@ -179,7 +181,7 @@ def start_photobooth():
 	pixel_width = 1200 #use a smaller size to process faster, and tumblr will only take up to 500 pixels wide for animated gifs
 	pixel_height = monitor_h * pixel_width // monitor_w
 	camera.resolution = (pixel_width, pixel_height) 
-	camera.vflip = False
+	camera.vflip = True
 	camera.hflip = False
 
 	#random effect (filter and color)
@@ -206,7 +208,7 @@ def start_photobooth():
 		for i, filename in enumerate(camera.capture_continuous(generated_filepath + now + '-' + '{counter:02d}.jpg')):
 			GPIO.output(led2_pin,True) #turn on the LED
 			print(filename)
-			sleep(0.25) #pause the LED on for just a bit
+			sleep(1) #pause the LED on for just a bit was 0.25
 			GPIO.output(led2_pin,False) #turn off the LED
 			sleep(capture_delay) # pause in-between shots
 			if i == total_pics-1:
@@ -250,7 +252,8 @@ def start_photobooth():
 	except Exception, e:
 		tb = sys.exc_info()[2]
 		traceback.print_exception(e.__class__, e, tb)
-	pygame.quit()
+		
+	#pygame.quit()
 	print "Done"
 	GPIO.output(led4_pin,False) #turn off the LED
 	
@@ -261,17 +264,17 @@ def start_photobooth():
 	
 	time.sleep(restart_delay)
 	show_image(real_path + "/intro.png");
-
-
+	
+	GPIO.remove_event_detect(button2_pin)
+	GPIO.add_event_detect(button2_pin, GPIO.BOTH, callback=shut_it_down, bouncetime=100) 
+	
 ####################
 ### Main Program ###
 ####################
 
 # when a falling edge is detected on button2_pin and button3_pin, regardless of whatever   
 # else is happening in the program, their function will be run   
-GPIO.add_event_detect(button2_pin, GPIO.FALLING, callback=shut_it_down, bouncetime=300) 
-GPIO.add_event_detect(button3_pin, GPIO.FALLING, callback=exit_photobooth, bouncetime=300) 
-
+#GPIO.add_event_detect(button2_pin, GPIO.FALLING, callback=shut_it_down, bouncetime=300)
 generated_tag = tag_gen(6)
 generated_filepath = config.file_path + "/" + generated_tag + "/"
 if not os.path.exists(generated_filepath):
@@ -291,7 +294,7 @@ GPIO.output(led3_pin,False);
 GPIO.output(led4_pin,False);
 
 show_image(real_path + "/intro.png");
-
+GPIO.add_event_detect(button2_pin, GPIO.BOTH, callback=shut_it_down, bouncetime=100) 
 
 while True:
         GPIO.wait_for_edge(button1_pin, GPIO.FALLING)
