@@ -2,22 +2,29 @@
 # created by chris@drumminhands.com
 # see instructions at http://www.drumminhands.com/2014/06/15/raspberry-pi-photo-booth/
 
+
 import os
 import glob
 import random
 import time
 import traceback
 from time import sleep
-import RPi.GPIO as GPIO
+import RPi.GPIO as GPIO #using physical pin numbering change in future?
 import picamera # http://picamera.readthedocs.org/en/release-1.4/install2.html
 import atexit
-import sys
+import sys, getopt
 import socket
-import uuid
 import pygame
+import cups
+import uuid
+from PIL import Image, ImageDraw, ImageFont
 import pytumblr # https://github.com/tumblr/pytumblr
+#from twython import Twython
 import config
+import shutil
+import datetime as dt
 from signal import alarm, signal, SIGALRM, SIGKILL
+from PIL import Image, ImageDraw
 
 ########################
 ### Variables Config ###
@@ -39,7 +46,7 @@ enable_image_effects = 0 # default 1. Change to 0 if you don't want to upload pi
 post_online = 1 # default 1. Change to 0 if you don't want to upload pics.
 
 total_pics = 4 # number of pics to be taken
-capture_delay = 4 # delay between pics
+capture_delay = 0 # delay between pics
 prep_delay = 3 # number of seconds at step 1 as users prep to have photo taken
 gif_delay = 100 # How much time between frames in the animated gif
 restart_delay = 4 # how long to display finished message before beginning a new session
@@ -56,6 +63,8 @@ replay_cycles = 1 # how many times to show each photo on-screen after taking
 
 test_server = 'www.google.com'
 real_path = os.path.dirname(os.path.realpath(__file__))
+
+font = ImageFont.truetype("/usr/share/fonts/truetype/freefont/FreeSans.ttf", 200)
 
 # Setup the tumblr OAuth Client
 client = pytumblr.TumblrRestClient(
@@ -110,7 +119,24 @@ def exit_photobooth(channel):
     GPIO.output(led4_pin,False);
     time.sleep(3)
     sys.exit()
-      
+
+def countdown(camera):
+	overlay_renderer = None
+	for j in range(1,4):
+		img = Image.new("RGB", (monitor_w, monitor_h))
+		draw = ImageDraw.Draw(img)
+		draw.text(((monitor_w/2)-50,(monitor_h/2)-50), str(4-j), (255, 255, 255), font=font)
+		if not overlay_renderer:
+			overlay_renderer = camera.add_overlay(img.tostring(),layer=3,size=img.size,alpha=28);
+		else:
+			overlay_renderer.update(img.tostring())
+		sleep(1)
+
+	img = Image.new("RGB", (monitor_w, monitor_h))
+	draw = ImageDraw.Draw(img)
+	draw.text((monitor_w/2,monitor_h/2), " ", (255, 255, 255), font=font)
+	overlay_renderer.update(img.tostring())
+	
 def is_connected():
   try:
     # see if we can resolve the host name -- tells us if there is
@@ -159,7 +185,7 @@ def display_pics(jpg_group):
     except Alarm:
         raise KeyboardInterrupt
     for i in range(0, replay_cycles): #show pics a few times
-		for i in range(1, total_pics+1): #show each pic
+		for i in range(0, total_pics): #show each pic
 			filename = generated_filepath + jpg_group + "-0" + str(i) + ".jpg"
                         show_image(filename);
 			time.sleep(replay_delay) # pause 
@@ -178,7 +204,7 @@ def start_photobooth():
 	show_image(real_path + "/blank.png")
 	
 	camera = picamera.PiCamera()
-	pixel_width = 1200 #use a smaller size to process faster, and tumblr will only take up to 500 pixels wide for animated gifs
+	pixel_width = 1000 #use a smaller size to process faster, and tumblr will only take up to 500 pixels wide for animated gifs
 	pixel_height = monitor_h * pixel_width // monitor_w
 	camera.resolution = (pixel_width, pixel_height) 
 	camera.vflip = True
@@ -195,20 +221,22 @@ def start_photobooth():
 		print "Filter effect: " + image_effect
 		camera.image_effect = image_effect
 	
-	
-	# camera.saturation = -100 # comment out this line if you want color images
+	camera.saturation = -20 # comment out this line if you want color images
 	camera.start_preview()
-
 	sleep(2) #warm up camera
-
+	
 	################################# Begin Step 2 #################################
-	print "Taking pics" 
+	print "Taking pics"
 	now = time.strftime("%Y-%m-%d-%H:%M:%S") #get the current date and time for the start of the filename
 	try: #take the photos
-		for i, filename in enumerate(camera.capture_continuous(generated_filepath + now + '-' + '{counter:02d}.jpg')):
+		#for i, filename in enumerate(camera.capture_continuous(config.file_path + now + '-' + '{counter:02d}.jpg')):
+		for i in range(0, total_pics):
+			filename = generated_filepath + now + "-0" + str(i) + ".jpg"
+			countdown(camera)
+			camera.capture(filename)
 			GPIO.output(led2_pin,True) #turn on the LED
 			print(filename)
-			sleep(1) #pause the LED on for just a bit was 0.25
+			sleep(0.25) #pause the LED on for just a bit
 			GPIO.output(led2_pin,False) #turn off the LED
 			sleep(capture_delay) # pause in-between shots
 			if i == total_pics-1:
