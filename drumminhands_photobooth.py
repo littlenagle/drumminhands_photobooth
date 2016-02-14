@@ -37,6 +37,8 @@ led2_pin = 19 # LED 2
 led3_pin = 21 # LED 3
 led4_pin = 23 # LED 4
 
+MakeAnimatedGif = 1 # 1 = animated gif, 0 = mosaic
+
 button1_pin = 22 # pin for the big red button
 button2_pin = 18 # pin for button to shutdown the pi
 button3_pin = 16 # pin for button to end the program, but not shutdown the pi
@@ -85,8 +87,8 @@ GPIO.setup(led3_pin,GPIO.OUT) # LED 3
 GPIO.setup(led4_pin,GPIO.OUT) # LED 4
 
 GPIO.setup(button1_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP) # falling edge detection on button 1
-GPIO.setup(button2_pin, GPIO.IN, pull_up_down=GPIO.PUD_DOWN) # falling edge detection on button 2
-GPIO.setup(button3_pin, GPIO.IN, pull_up_down=GPIO.PUD_DOWN) # falling edge detection on button 3
+GPIO.setup(button2_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP) # falling edge detection on button 2
+GPIO.setup(button3_pin, GPIO.IN, pull_up_down=GPIO.PUD_UP) # falling edge detection on button 3
 
 GPIO.output(led1_pin,False);
 GPIO.output(led2_pin,False);
@@ -190,7 +192,25 @@ def display_pics(jpg_group):
                         show_image(filename);
 			time.sleep(replay_delay) # pause 
 
-				
+def create_mosaic(jpg_group): 
+	now = jpg_group 
+	#moving original pics to backup
+	# copypics = "cp " +file_path + now + "*.jpg "+ file_path+"PB_archive/"
+	# print copypics
+	# os.system(copypics)
+
+	#resizing + montaging
+	print "Resizing Pics..." #necessary?
+	#convert -resize 968x648 /home/pi/photobooth/pics/*.jpg /home/pi/photobooth/pics_tmp/*_tmp.jpg
+	graphicsmagick = "gm mogrify -resize 968x648 " + generated_filepath + now + "*.jpg" 
+	#print "Resizing with command: " + graphicsmagick
+	os.system(graphicsmagick) 
+
+	print "Montaging Pics..."
+	graphicsmagick = "gm montage " + generated_filepath + now + "*.jpg -tile 2x2 -geometry 1000x699+10+10 " + generated_filepath + now + "_mosaic.jpg" 
+	#print "Montaging images with command: " + graphicsmagick
+	os.system(graphicsmagick) 
+	
 # define the photo taking function for when the big button is pressed 
 def start_photobooth(): 
 	################################# Begin Step 1 ################################# 
@@ -233,8 +253,8 @@ def start_photobooth():
 		for i in range(0, total_pics):
 			filename = generated_filepath + now + "-0" + str(i) + ".jpg"
 			countdown(camera)
-			camera.capture(filename)
 			GPIO.output(led2_pin,True) #turn on the LED
+			camera.capture(filename)
 			print(filename)
 			sleep(0.25) #pause the LED on for just a bit
 			GPIO.output(led2_pin,False) #turn off the LED
@@ -244,23 +264,37 @@ def start_photobooth():
 	finally:
 		camera.stop_preview()
 		camera.close()
+		
 	########################### Begin Step 3 #################################
-	print "Creating an animated gif" 
+	show_image(real_path + "/processing.png")
+
+	if MakeAnimatedGif:
+		print "Creating an animated gif" 
+	
+		GPIO.output(led3_pin,True) #turn on the LED
+		graphicsmagick = "gm convert -delay " + str(gif_delay) + " " + generated_filepath + now + "*.jpg " + generated_filepath + now + ".gif" 
+		os.system(graphicsmagick) #make the .gif
+	else:
+		print "Creating an Mosaic" 
+		try:
+			create_mosaic(now)
+		except Exception, e:
+			tb = sys.exc_info()[2]
+			traceback.print_exception(e.__class__, e, tb)
+	
 	if post_online:
 		show_image(real_path + "/uploading.png")
-	else:
-		show_image(real_path + "/processing.png")
-
-	GPIO.output(led3_pin,True) #turn on the LED
-	graphicsmagick = "gm convert -delay " + str(gif_delay) + " " + generated_filepath + now + "*.jpg " + generated_filepath + now + ".gif" 
-	os.system(graphicsmagick) #make the .gif
+		
 	print "Uploading to tumblr. Please check " + config.tumblr_blog + ".tumblr.com soon."
-
 	if post_online: # turn off posting pics online in the variable declarations at the top of this document
 		connected = is_connected() #check to see if you have an internet connection
 		while connected: 
 			try:
-				file_to_upload = generated_filepath + now + ".gif"
+				if MakeAnimatedGif:
+					file_to_upload = generated_filepath + now + ".gif"
+				else:
+					file_to_upload = generated_filepath + now + "_mosaic.jpg"
+					
 				client.create_photo(config.tumblr_blog, state="published", tags=["PartyPics", generated_tag], data=file_to_upload)
 				break
 			except ValueError:
@@ -294,7 +328,7 @@ def start_photobooth():
 	show_image(real_path + "/intro.png");
 	
 	GPIO.remove_event_detect(button2_pin)
-	GPIO.add_event_detect(button2_pin, GPIO.BOTH, callback=shut_it_down, bouncetime=100) 
+	GPIO.add_event_detect(button2_pin, GPIO.BOTH, callback=exit_photobooth, bouncetime=100) 
 	
 ####################
 ### Main Program ###
@@ -322,9 +356,11 @@ GPIO.output(led3_pin,False);
 GPIO.output(led4_pin,False);
 
 show_image(real_path + "/intro.png");
-GPIO.add_event_detect(button2_pin, GPIO.BOTH, callback=shut_it_down, bouncetime=100) 
+GPIO.add_event_detect(button2_pin, GPIO.BOTH, callback=exit_photobooth, bouncetime=100) 
 
 while True:
-        GPIO.wait_for_edge(button1_pin, GPIO.FALLING)
+        GPIO.wait_for_edge(button1_pin, GPIO.BOTH)
+		
 	time.sleep(0.2) #debounce
+	
 	start_photobooth()
