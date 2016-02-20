@@ -304,7 +304,8 @@ def start_photobooth():
 					file.close()
 				except:
 					print('Something went wrong. Could not write file.')
-					sys.exit(0) # quit Python
+					#sys.exit(0) # quit Python
+					
 	GPIO.output(led3_pin,False) #turn off the LED
 	
 	########################### Begin Step 4 #################################
@@ -328,7 +329,7 @@ def start_photobooth():
 	show_image(real_path + "/intro.png");
 	
 	GPIO.remove_event_detect(button2_pin)
-	GPIO.add_event_detect(button2_pin, GPIO.BOTH, callback=exit_photobooth, bouncetime=100) 
+	GPIO.add_event_detect(button2_pin, GPIO.BOTH, callback=shut_it_down, bouncetime=100) 
 	
 ####################
 ### Main Program ###
@@ -356,7 +357,7 @@ GPIO.output(led3_pin,False);
 GPIO.output(led4_pin,False);
 
 show_image(real_path + "/intro.png");
-GPIO.add_event_detect(button2_pin, GPIO.BOTH, callback=exit_photobooth, bouncetime=100) 
+GPIO.add_event_detect(button2_pin, GPIO.BOTH, callback=shut_it_down, bouncetime=100) 
 
 while True:
         GPIO.wait_for_edge(button1_pin, GPIO.BOTH)
