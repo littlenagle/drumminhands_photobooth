@@ -8,6 +8,7 @@ import glob
 import random
 import time
 import traceback
+import re
 from time import sleep
 import RPi.GPIO as GPIO #using physical pin numbering change in future?
 import picamera # http://picamera.readthedocs.org/en/release-1.4/install2.html
@@ -16,6 +17,9 @@ import sys, getopt
 import socket
 import pygame
 import cups
+import fcntl
+import struct
+import commands
 import uuid
 from PIL import Image, ImageDraw, ImageFont
 import pytumblr # https://github.com/tumblr/pytumblr
@@ -68,6 +72,14 @@ real_path = os.path.dirname(os.path.realpath(__file__))
 
 font = ImageFont.truetype("/usr/share/fonts/truetype/freefont/FreeSans.ttf", 200)
 
+#extract the ip address (or addresses) from ifconfig
+found_ips = []
+ips = re.findall( r'[0-9]+(?:\.[0-9]+){3}', commands.getoutput("/sbin/ifconfig"))
+for ip in ips:
+  if ip.startswith("255") or ip.startswith("127") or ip.endswith("255"):
+    continue
+  found_ips.append(ip)
+
 # Setup the tumblr OAuth Client
 client = pytumblr.TumblrRestClient(
     config.consumer_key,
@@ -98,7 +110,7 @@ GPIO.output(led4_pin,False);
 #################
 ### Functions ###
 #################
-
+   
 def cleanup():
   print('Ended abruptly')
   GPIO.cleanup()
@@ -121,7 +133,7 @@ def exit_photobooth(channel):
     GPIO.output(led4_pin,False);
     time.sleep(3)
     sys.exit()
-
+	
 def countdown(camera):
 	overlay_renderer = None
 	for j in range(1,4):
@@ -165,13 +177,26 @@ def init_pygame():
     pygame.mouse.set_visible(False) #hide the mouse cursor	
     return pygame.display.set_mode(size, pygame.FULLSCREEN)
 
-def show_image(image_path):
-    screen = init_pygame()
-    img=pygame.image.load(image_path) 
-    img = pygame.transform.scale(img,(transform_x,transfrom_y))
-    screen.blit(img,(offset_x,offset_y))
-    pygame.display.flip()
-
+def show_image(image_path, t):
+	screen = init_pygame()
+	img=pygame.image.load(image_path).convert()
+	img = pygame.transform.scale(img,(transform_x,transfrom_y))
+	
+	sprite = pygame.sprite.Sprite()
+	sprite.image = img
+	sprite.rect = img.get_rect()
+	
+	font = pygame.font.SysFont('Sans', 20)
+	text=font.render(t, 1,(255,255,255))
+	sprite.image.blit(text, (10, 10))
+	
+	group = pygame.sprite.Group()
+	group.add(sprite)
+	group.draw(screen)
+	
+	pygame.display.flip()
+	
+	
 def display_pics(jpg_group):
     # this section is an unbelievable nasty hack - for some reason Pygame
     # needs a keyboardinterrupt to initialise in some limited circs (second time running)
@@ -189,7 +214,7 @@ def display_pics(jpg_group):
     for i in range(0, replay_cycles): #show pics a few times
 		for i in range(0, total_pics): #show each pic
 			filename = generated_filepath + jpg_group + "-0" + str(i) + ".jpg"
-                        show_image(filename);
+                        show_image(filename, "");
 			time.sleep(replay_delay) # pause 
 
 def create_mosaic(jpg_group): 
@@ -214,14 +239,14 @@ def create_mosaic(jpg_group):
 # define the photo taking function for when the big button is pressed 
 def start_photobooth(): 
 	################################# Begin Step 1 ################################# 
-	show_image(real_path + "/blank.png")
+	show_image(real_path + "/blank.png", "")
 	print "Get Ready"
 	GPIO.output(led1_pin,True);
-	show_image(real_path + "/instructions.png")
+	show_image(real_path + "/instructions.png", "")
 	sleep(prep_delay) 
 
 	GPIO.output(led1_pin,False)
-	show_image(real_path + "/blank.png")
+	show_image(real_path + "/blank.png", "")
 	
 	camera = picamera.PiCamera()
 	pixel_width = 1000 #use a smaller size to process faster, and tumblr will only take up to 500 pixels wide for animated gifs
@@ -229,7 +254,18 @@ def start_photobooth():
 	camera.resolution = (pixel_width, pixel_height) 
 	camera.vflip = True
 	camera.hflip = False
-
+	
+	#camera.sharpness = 10
+	#camera.contrast = 30
+	#camera.brightness = 60
+	#camera.saturation = 50
+	
+	#camera.video_stabilization = True
+	#camera.exposure_compensation = 0
+	#camera.exposure_mode = 'night'
+	camera.meter_mode = 'average'
+	camera.awb_mode = 'auto'
+	
 	#random effect (filter and color)
 	if enable_color_effects:
 		colour = (random.randint(0, 256),random.randint(0, 256))
@@ -266,7 +302,7 @@ def start_photobooth():
 		camera.close()
 		
 	########################### Begin Step 3 #################################
-	show_image(real_path + "/processing.png")
+	show_image(real_path + "/processing.png", "")
 
 	if MakeAnimatedGif:
 		print "Creating an animated gif" 
@@ -283,7 +319,7 @@ def start_photobooth():
 			traceback.print_exception(e.__class__, e, tb)
 	
 	if post_online:
-		show_image(real_path + "/uploading.png")
+		show_image(real_path + "/uploading.png", "")
 		
 	print "Uploading to tumblr. Please check " + config.tumblr_blog + ".tumblr.com soon."
 	if post_online: # turn off posting pics online in the variable declarations at the top of this document
@@ -321,12 +357,12 @@ def start_photobooth():
 	GPIO.output(led4_pin,False) #turn off the LED
 	
 	if post_online:
-		show_image(real_path + "/finished.png")
+		show_image(real_path + "/finished.png", "")
 	else:
-		show_image(real_path + "/finished2.png")
+		show_image(real_path + "/finished2.png", "")
 	
 	time.sleep(restart_delay)
-	show_image(real_path + "/intro.png");
+	show_image(real_path + "/intro.png", "");
 	
 	GPIO.remove_event_detect(button2_pin)
 	GPIO.add_event_detect(button2_pin, GPIO.BOTH, callback=shut_it_down, bouncetime=100) 
@@ -356,12 +392,27 @@ GPIO.output(led2_pin,False);
 GPIO.output(led3_pin,False);
 GPIO.output(led4_pin,False);
 
-show_image(real_path + "/intro.png");
-GPIO.add_event_detect(button2_pin, GPIO.BOTH, callback=shut_it_down, bouncetime=100) 
+print "IP: "+"\r\n".join(found_ips)
+show_image(real_path + "/intro.png", "IP: "+"\r\n".join(found_ips));
+time.sleep(5)
 
-while True:
-        GPIO.wait_for_edge(button1_pin, GPIO.BOTH)
-		
-	time.sleep(0.2) #debounce
-	
-	start_photobooth()
+GPIO.add_event_detect(button2_pin, GPIO.BOTH, callback=exit_photobooth, bouncetime=100) 
+
+try:  
+	while True:
+		GPIO.wait_for_edge(button1_pin, GPIO.BOTH)
+		time.sleep(0.5) #debounce
+		start_photobooth()
+except KeyboardInterrupt:  
+    # here you put any code you want to run before the program   
+    # exits when you press CTRL+C  
+    print "\n", counter # print value of counter  
+  
+except:  
+    # this catches ALL other exceptions including errors.  
+    # You won't get any error messages for debugging  
+    # so only use it once your code is working  
+    print "Other error or exception occurred!"  
+  
+finally:  
+    GPIO.cleanup() # this ensures a clean exit  
