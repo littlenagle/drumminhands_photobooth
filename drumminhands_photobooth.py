@@ -1,6 +1,15 @@
 #!/usr/bin/env python
 # created by chris@drumminhands.com
 # see instructions at http://www.drumminhands.com/2014/06/15/raspberry-pi-photo-booth/
+# This code is a mashup of three separate but related projects that I have combined to make it function how I envision
+# The bulk of the code comes from here, along with the inspiration:  https://github.com/drumminhands/drumminhands_photobooth
+# Part of the countdown setup comes from here:  https://github.com/galadril/drumminhands_photobooth/  (I had trouble with the screen going black after the 3rd picture and not 
+#coming back on until the processing image appeared.)
+# The changes to the countdown setup came from here:  https://github.com/jrleeman/PiBooth/ (really neat ideas in his code.  Very clean and well documented, however, no preview of 
+# the images afterwards.)  Also has code for uploading to twitter as an expansion.
+# Future development I want to add to the code is the idea that galadril had to create a short press for animated gif and long press for mosaic.  I think that would be an awesome 
+# addition to the code
+
 
 
 import os
@@ -16,7 +25,7 @@ import atexit
 import sys, getopt
 import socket
 import pygame
-import cups
+#import cups
 import fcntl
 import struct
 import commands
@@ -49,28 +58,32 @@ button3_pin = 16 # pin for button to end the program, but not shutdown the pi
 
 enable_color_effects = 0 # default 1. Change to 0 if you don't want to upload pics.
 enable_image_effects = 0 # default 1. Change to 0 if you don't want to upload pics.
-post_online = 1 # default 1. Change to 0 if you don't want to upload pics.
+post_online = 0 # default 1. Change to 0 if you don't want to upload pics.
 
 total_pics = 4 # number of pics to be taken
 capture_delay = 0 # delay between pics
 prep_delay = 3 # number of seconds at step 1 as users prep to have photo taken
 gif_delay = 100 # How much time between frames in the animated gif
 restart_delay = 4 # how long to display finished message before beginning a new session
+count_from = 3 # How long should the countdown be before each photo
 
 monitor_w = 800
-monitor_h = 480
+monitor_h = 600
 transform_x = 800 # how wide to scale the jpg when replaying
-transfrom_y = 480 # how high to scale the jpg when replaying
+transfrom_y = 600 # how high to scale the jpg when replaying
 
 offset_x = 0 # how far off to left corner to display photos
 offset_y = 0 # how far off to left corner to display photos
 replay_delay = 1 # how much to wait in-between showing pics on-screen after taking
-replay_cycles = 1 # how many times to show each photo on-screen after taking
+replay_cycles = 2 # how many times to show each photo on-screen after taking
 
 test_server = 'www.google.com'
 real_path = os.path.dirname(os.path.realpath(__file__))
 
 font = ImageFont.truetype("/usr/share/fonts/truetype/freefont/FreeSans.ttf", 200)
+bigfont = pygame.font.Font(None, 800)
+smfont = pygame.font.Font(None, 600)
+tinyfont = pygame.font.Font(None, 300)
 
 #extract the ip address (or addresses) from ifconfig
 found_ips = []
@@ -134,22 +147,101 @@ def exit_photobooth(channel):
     time.sleep(3)
     sys.exit()
 	
-def countdown(camera):
-	overlay_renderer = None
-	for j in range(1,4):
-		img = Image.new("RGB", (monitor_w, monitor_h))
-		draw = ImageDraw.Draw(img)
-		draw.text(((monitor_w/2)-50,(monitor_h/2)-50), str(4-j), (255, 255, 255), font=font)
-		if not overlay_renderer:
-			overlay_renderer = camera.add_overlay(img.tostring(),layer=3,size=img.size,alpha=28);
-		else:
-			overlay_renderer.update(img.tostring())
-		sleep(1)
+def drawText(font, textstr, clear_screen=True, color=(250, 10, 10)):
+    """
+    Draws the given string onto the pygame screen.
+    Parameters:
+    -----------
+    font : object
+        pygame font object
+    textstr: string
+        text to be written to the screen
+    clean_screan : boolean
+        determines if previously shown text should be cleared
+    color : tuple
+        RGB tuple of font color
+    Returns:
+    --------
+    None
+    """
+    if clear_screen:
+        screen.fill(black)  # black screen
 
-	img = Image.new("RGB", (monitor_w, monitor_h))
-	draw = ImageDraw.Draw(img)
-	draw.text((monitor_w/2,monitor_h/2), " ", (255, 255, 255), font=font)
-	overlay_renderer.update(img.tostring())
+    # Render font
+    pltText = font.render(textstr, 1, color)
+
+    # Center text
+    textpos = pltText.get_rect()
+    textpos.centerx = screen.get_rect().centerx
+    textpos.centery = screen.get_rect().centery
+
+    # Blit onto screen
+    screen.blit(pltText, textpos)
+
+    # Update
+    pygame.display.update()
+
+
+def clearScreen():
+    """
+    Clears the pygame screen of all drawn objects.
+    Parameters:
+    -----------
+    None
+    Returns:
+    --------
+    None
+    """
+    screen.fill(black)
+    pygame.display.update()
+
+	
+#def countdown(camera):
+#	overlay_renderer = None
+#	for j in range(1,4):
+#		img = Image.new("RGB", (monitor_w, monitor_h))
+#		draw = ImageDraw.Draw(img)
+#		draw.text(((monitor_w/2)-50,(monitor_h/2)-50), str(4-j), (255, 255, 255), font=font)
+#		if not overlay_renderer:
+#			overlay_renderer = camera.add_overlay(img.tostring(),layer=3,size=img.size,alpha=28);
+#		else:
+#			overlay_renderer.update(img.tostring())
+#		sleep(1)
+#
+#	img = Image.new("RGB", (monitor_w, monitor_h))
+#	draw = ImageDraw.Draw(img)
+#	draw.text((monitor_w/2,monitor_h/2), " ", (255, 255, 255), font=font)
+#	overlay_renderer.update(img.tostring())
+
+def doCountdown(pretext="Ready", pretext_fontsize=600, count_from):
+    """
+    Performs on screen countdown
+    Parameters:
+    -----------
+    pretext : string
+        Text shown before countdown starts
+    pretext_fontsize : int
+        Size of pretext font
+    countfrom : int
+        Number to count down from
+    """
+    pretext_font = pygame.font.Font(None, pretext_fontsize)
+    drawText(pretext_font, pretext)
+    sleep(1)
+    clearScreen()
+
+    # Count down on the display
+    for i in range(count_from, 0, -1):
+        # Draw text on the screen
+        drawText(bigfont, str(i))
+
+        # Flash the LED during the second of dead time
+        #for j in range(4):
+        #    outputToggle(ledPin, False, time=0.125)
+        #    outputToggle(ledPin, True, time=0.125)
+
+    # Clear the screen one final time so no numbers are left
+    clearScreen()
 	
 def is_connected():
   try:
@@ -175,7 +267,8 @@ def init_pygame():
     size = (pygame.display.Info().current_w, pygame.display.Info().current_h)
     pygame.display.set_caption('Photo Booth Pics')
     pygame.mouse.set_visible(False) #hide the mouse cursor	
-    return pygame.display.set_mode(size, pygame.FULLSCREEN)
+	black = 0, 0, 0
+	return pygame.display.set_mode(size, pygame.FULLSCREEN)
 
 def show_image(image_path, t):
 	screen = init_pygame()
@@ -252,7 +345,7 @@ def start_photobooth():
 	pixel_width = 1000 #use a smaller size to process faster, and tumblr will only take up to 500 pixels wide for animated gifs
 	pixel_height = monitor_h * pixel_width // monitor_w
 	camera.resolution = (pixel_width, pixel_height) 
-	camera.vflip = True
+	camera.vflip = False
 	camera.hflip = False
 	
 	#camera.sharpness = 10
@@ -267,15 +360,15 @@ def start_photobooth():
 	camera.awb_mode = 'auto'
 	
 	#random effect (filter and color)
-	if enable_color_effects:
-		colour = (random.randint(0, 256),random.randint(0, 256))
-		print "Colour effect: " + str(colour)
-		camera.color_effects = colour
+	#if enable_color_effects:
+	#	colour = (random.randint(0, 256),random.randint(0, 256))
+	#	print "Colour effect: " + str(colour)
+	#	camera.color_effects = colour
 	
-	if enable_image_effects:
-		image_effect = picamera.PiCamera.IMAGE_EFFECTS.keys()[random.randint(0, len(picamera.PiCamera.IMAGE_EFFECTS))]	
-		print "Filter effect: " + image_effect
-		camera.image_effect = image_effect
+	#if enable_image_effects:
+	#	image_effect = picamera.PiCamera.IMAGE_EFFECTS.keys()[random.randint(0, len(picamera.PiCamera.IMAGE_EFFECTS))]	
+	#	print "Filter effect: " + image_effect
+	#	camera.image_effect = image_effect
 	
 	camera.saturation = -20 # comment out this line if you want color images
 	camera.start_preview()
@@ -288,7 +381,8 @@ def start_photobooth():
 		#for i, filename in enumerate(camera.capture_continuous(config.file_path + now + '-' + '{counter:02d}.jpg')):
 		for i in range(0, total_pics):
 			filename = generated_filepath + now + "-0" + str(i) + ".jpg"
-			countdown(camera)
+			doCountdown()
+			#countdown(camera)
 			GPIO.output(led2_pin,True) #turn on the LED
 			camera.capture(filename)
 			print(filename)
@@ -331,7 +425,7 @@ def start_photobooth():
 				else:
 					file_to_upload = generated_filepath + now + "_mosaic.jpg"
 					
-				client.create_photo(config.tumblr_blog, state="published", tags=["PartyPics", generated_tag], data=file_to_upload)
+				client.create_photo(config.tumblr_blog, state="published", tags=["Photobooth", generated_tag], data=file_to_upload)
 				break
 			except ValueError:
 				print "Oops. No internect connection. Upload later."
@@ -379,7 +473,7 @@ generated_filepath = config.file_path + "/" + generated_tag + "/"
 if not os.path.exists(generated_filepath):
     os.makedirs(generated_filepath)
 
-print "PartyPics app running..." 
+print "Photobooth running..." 
 GPIO.output(led1_pin,True); #light up the lights to show the app is running
 GPIO.output(led2_pin,True);
 GPIO.output(led3_pin,True);
@@ -396,7 +490,9 @@ print "IP: "+"\r\n".join(found_ips)
 show_image(real_path + "/intro.png", "IP: "+"\r\n".join(found_ips));
 time.sleep(5)
 
-GPIO.add_event_detect(button2_pin, GPIO.BOTH, callback=exit_photobooth, bouncetime=100) 
+#GPIO.add_event_detect(button2_pin, GPIO.BOTH, callback=exit_photobooth, bouncetime=100)
+GPIO.add_event_detect(button3_pin, GPIO.FALLING, callback=exit_photobooth, bouncetime=300)
+
 
 try:  
 	while True:
